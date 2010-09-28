@@ -1,186 +1,86 @@
-#include <iostream>
+#include "vtkKMeansClustering.h"
 
-#include <Tools/Tools.h>
+#include <vtkSmartPointer.h>
+#include <vtkMath.h>
+#include <vtkPoints.h>
+#include <vtkPolyData.h>
 
-#include <ModelFile/ModelFile.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkActor.h>
+#include <vtkRenderer.h>
+#include <vtkRenderWindow.h>
+#include <vtkRenderWindowInteractor.h>
+#include <vtkProperty.h>
 
-#include <Geometry/Color.h>
-#include <Geometry/OrientedPoint.h>
+void GenerateData(vtkPolyData* polydata, int n);
 
-#include <vgl/vgl_point_3d.h>
-
-#include <vul/vul_timer.h>
-
-#include "Clustering.h"
-
-#include <vsl/vsl_binary_io.h>
-#include <vsl/vsl_vector_io.h>
-#include <vnl/io/vnl_io_matrix.h>
-#include <vnl/io/vnl_io_vector.h>
-
-#include <boost/program_options.hpp>
-namespace po = boost::program_options;
-
-void TestKMeans();
-void TestAgglomerativeClusterFakeData();
-
-void TestAgglomerativeClusterData(ModelFile &Model);
-
-vector<OrientedPoint> GenerateData();
-
-void WriteData(Agglomerative &A, ModelFile &Model);
-
-int main(int argc, char *argv[])
+int main(int, char *[])
 {
+  vtkSmartPointer<vtkPolyData> input =
+    vtkSmartPointer<vtkPolyData>::New();
+  GenerateData(input, 5);
 
-	//Tools::AssertNumArgs(argc, 2);
-	std::string InputFile = argv[1];
-	//string OutputFile = argv[2];
+  std::cout << "There are " << input->GetNumberOfPoints() << " input points." << std::endl;
 
-	//create the model
-	//ModelFile Model(InputFile);
+  vtkSmartPointer<vtkKMeansClustering> kmeans =
+    vtkSmartPointer<vtkKMeansClustering>::New();
+  kmeans->SetK(3);
+  //kmeans->SetInitTypeToRandomIndex();
+  //kmeans->SetInitTypeToRandom();
+  kmeans->SetInputConnection(input->GetProducerPort());
+  kmeans->Update();
 
-	TestKMeans();
-	
-	//TestAgglomerativeClusterFakeData();
+  std::cout << "There are " << kmeans->GetOutput()->GetNumberOfPoints() << " output points." << std::endl;
 
-	/*
-	vul_timer timer;
-	TestAgglomerativeClusterData(Model);
-	cout << "Time: " << timer.real() << " ms" << endl;
-	cout << "Time: " << (timer.real()/1000.)/60./60. << " hours" << endl;
-	*/
-	return 0;
+  // Visualize result
+  vtkSmartPointer<vtkPolyDataMapper> pointsMapper =
+    vtkSmartPointer<vtkPolyDataMapper>::New();
+  pointsMapper->SetInputConnection(kmeans->GetOutputPort(0));
+
+  vtkSmartPointer<vtkActor> pointsActor =
+    vtkSmartPointer<vtkActor>::New();
+  pointsActor->SetMapper(pointsMapper);
+  pointsActor->GetProperty()->SetPointSize(5);
+
+  vtkSmartPointer<vtkPolyDataMapper> centersMapper =
+    vtkSmartPointer<vtkPolyDataMapper>::New();
+  centersMapper->SetInputConnection(kmeans->GetOutputPort(1));
+
+  vtkSmartPointer<vtkActor> centersActor =
+    vtkSmartPointer<vtkActor>::New();
+  centersActor->SetMapper(centersMapper);
+
+  vtkSmartPointer<vtkRenderer> renderer =
+    vtkSmartPointer<vtkRenderer>::New();
+  vtkSmartPointer<vtkRenderWindow> renderWindow =
+    vtkSmartPointer<vtkRenderWindow>::New();
+  renderWindow->AddRenderer(renderer);
+  vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor =
+    vtkSmartPointer<vtkRenderWindowInteractor>::New();
+  renderWindowInteractor->SetRenderWindow(renderWindow);
+
+  renderer->AddActor(pointsActor);
+  renderer->AddActor(centersActor);
+  //renderer->SetBackground(1,1,1); // Background color white
+
+  renderWindow->Render();
+  renderWindowInteractor->Start();
+
+  return EXIT_SUCCESS;
 }
 
-void TestKMeans()
+void GenerateData(vtkPolyData* polydata, int n)
 {
-	std::vector<OrientedPoint> Points = GenerateData();
+  vtkSmartPointer<vtkPoints> points =
+    vtkSmartPointer<vtkPoints>::New();
 
-	std::vector<unsigned int> Clusters = KMeans(Points, 3);
 
-	Tools::OutputVector(Clusters);
-	
-}
+  for(unsigned int i = 0; i < n; i++)
+    {
+    points->InsertNextPoint(1.0 + vtkMath::Random(-.1, .1), 1.0 + vtkMath::Random(-.1, .1), 1.0 + vtkMath::Random(-.1, .1));
+    points->InsertNextPoint(-1.0 + vtkMath::Random(-.1, .1), -1.0 + vtkMath::Random(-.1, .1), -1.0 + vtkMath::Random(-.1, .1));
+    points->InsertNextPoint(1.0 + vtkMath::Random(-.1, .1), -1.0 + vtkMath::Random(-.1, .1), 1.0 + vtkMath::Random(-.1, .1));
+    }
 
-#include <vsl/vsl_vector_io.txx>
-#include <vbl/io/vbl_io_array_2d.txx>
-VSL_VECTOR_IO_INSTANTIATE(vbl_array_2d<double>);
-VSL_VECTOR_IO_INSTANTIATE(vbl_array_2d<bool>);
-
-//VSL_VECTOR_IO_INSTANTIATE(vbl_array_2d<ValidType<double> >);
-	    
-void TestAgglomerativeClusterFakeData()
-{
-	std::vector<OrientedPoint> Points = GenerateData();
-	//Tools::OutputVector(Points);
-	
-	Agglomerative A(Points, 0.2);
-	//A.OutputDistanceMatrix();
-	
-	A.PerformClustering();
-	
-	std::vector<unsigned int> PointLabels = A.getPointLabels();
-	
-	//WriteData(A);
-	
-	
-	//cout << "Final Clusters" << endl << "------------" << endl;
-	//cout << "There are " << Clusters.size() << " clusters." << endl;
-	
-	Tools::OutputVector(PointLabels);
-	
-	
-}
-
-void TestAgglomerativeClusterData(ModelFile &Model)
-{
-	std::vector<OrientedPoint> ModelPoints = Model.getPoints();
-	Agglomerative A(ModelPoints, 0.7);
-	A.PerformClustering();
-	
-	WriteData(A, Model);
-	
-	cout << "There are : " << Tools::UniqueElements(A.getPointLabels()).size() << " clusters." << endl;
-
-}
-
-vector<OrientedPoint> GenerateData()
-{
-
-	OrientedPoint P0(vgl_point_3d<double> (1.0, 1.0, 1.0));
-	OrientedPoint P1(vgl_point_3d<double> (1.01, 1.01, 1.01));
-	OrientedPoint P2(vgl_point_3d<double> (1.02, 1.02, 1.02));
-
-	OrientedPoint P3(vgl_point_3d<double> (-1.0, -1.0, -1.0));
-	OrientedPoint P4(vgl_point_3d<double> (-1.01, -1.01, -1.01));
-	OrientedPoint P5(vgl_point_3d<double> (-1.02, -1.02, -1.02));
-
-	OrientedPoint P6(vgl_point_3d<double> (1.0, -1.0, 1.0));
-	OrientedPoint P7(vgl_point_3d<double> (1.01, -1.01, 1.02));
-	OrientedPoint P8(vgl_point_3d<double> (1.02, -1.02, 1.02));
-
-	std::vector<OrientedPoint> Points;
-	Points.push_back(P0);
-	Points.push_back(P1);
-	Points.push_back(P2);
-	Points.push_back(P3);
-	Points.push_back(P4);
-	Points.push_back(P5);
-	Points.push_back(P6);
-	Points.push_back(P7);
-	Points.push_back(P8);
-
-	return Points;
-}
-
-void WriteData(Agglomerative &A, ModelFile &Model)
-{
-
-	std::vector<unsigned int> PointLabels = A.getPointLabels();
-	
-	std::vector<unsigned int> UniqueLabels = Tools::UniqueElements(PointLabels);
-	std::vector<Color<unsigned char> > Colors = Spectrum(UniqueLabels.size());
-
-	for(unsigned int label = 0; label < UniqueLabels.size(); label++)
-	{
-		for(unsigned int p = 0; p < Model.NumPoints(); p++)
-		{
-			if(PointLabels[p] == UniqueLabels[label])
-				Model.Points_[p].setColor(Colors[label]);
-		}
-	}
-	
-	Model.Write("Clusters.vtp");
-	
-	vsl_b_ofstream outputPDM("PointDistanceMatrix.bin");
-	vsl_b_write(outputPDM, A.PointDistanceMatrix);
-	outputPDM.close();
-	
-	vbl_array_2d<double> CDMValue(PointLabels.size(), PointLabels.size());
-	vbl_array_2d<bool> CDMValid(PointLabels.size(), PointLabels.size());
-	for(unsigned int i = 0; i < PointLabels.size(); i++)
-	{
-		for(unsigned int j = 0; j < PointLabels.size(); j++)
-		{
-			CDMValue(i,j) = A.ClusterDistanceMatrix(i,j).Value;
-			CDMValid(i,j) = A.ClusterDistanceMatrix(i,j).Valid;
-		}
-	}
-	vsl_b_ofstream outputCDMValue("ClusterDistanceMatrixValue.bin");
-	vsl_b_write(outputCDMValue, CDMValue);
-	outputCDMValue.close();
-	
-	vsl_b_ofstream outputCDMValid("ClusterDistanceMatrixValid.bin");
-	vsl_b_write(outputCDMValid, CDMValid);
-	outputCDMValid.close();
-	/*
-	vsl_b_ofstream outputCDM("ClusterDistanceMatrix.bin");
-	vsl_b_write(outputCDM, A.ClusterDistanceMatrix);
-	outputCDM.close();
-	*/
-	
-	vsl_b_ofstream outputPL("PointLabels.bin");
-	vsl_b_write(outputPL, PointLabels);
-	outputPL.close();
+  polydata->SetPoints(points);
 }
