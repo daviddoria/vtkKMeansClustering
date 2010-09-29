@@ -10,17 +10,20 @@
 #include <vtkUnsignedCharArray.h>
 #include <vtkPointData.h>
 #include <vtkVertexGlyphFilter.h>
-#include <vtkSphereSource.h>
-#include <vtkGlyph3D.h>
 
 #include <set>
+#include <numeric>
+#include <limits>
 
 vtkStandardNewMacro(vtkKMeansClustering);
 
 vtkKMeansClustering::vtkKMeansClustering()
 {
-  this->InitType = RANDOMINDEX;
   this->SetNumberOfOutputPorts(2);
+  this->K = 3;
+  this->InitMethod = KMEANSPP;
+
+  this->Points = vtkSmartPointer<vtkPoints>::New();
 }
 
 int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
@@ -36,6 +39,8 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
   vtkPolyData *input = vtkPolyData::SafeDownCast(
       inInfo->Get(vtkDataObject::DATA_OBJECT()));
 
+  this->Points->ShallowCopy(input->GetPoints());
+
   vtkPolyData *outputColoredPoints = vtkPolyData::SafeDownCast(
       outInfoColoredPoints->Get(vtkDataObject::DATA_OBJECT()));
 
@@ -46,47 +51,76 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
     vtkSmartPointer<vtkPoints>::New();
   clusterCenters->SetNumberOfPoints(this->K);
 
-  if(this->InitType == RANDOMINDEX)
-    {
-    // Initialize the cluster centers to be random existing points
-    std::vector<unsigned int> randomIndices = UniqueRandomIndices(input->GetNumberOfPoints(), this->K);
-    for(unsigned int i = 0; i < this->K; i++)
-      {
-      clusterCenters->SetPoint(i, input->GetPoint(randomIndices[i]));
-      }
-    }
-  else if(this->InitType == RANDOM)
+  if(this->InitMethod == RANDOM)
     {
     // Completely randomly choose initial cluster centers
-    double bounds[6];
-    input->GetBounds(bounds);
+    vtkMath::RandomSeed(time(NULL));
     for(unsigned int i = 0; i < this->K; i++)
       {
       double p[3];
-      p[0] = vtkMath::Random(bounds[0], bounds[1]);
-      p[1] = vtkMath::Random(bounds[2], bounds[3]);
-      p[2] = vtkMath::Random(bounds[4], bounds[5]);
+      GetRandomPointInBounds(input->GetPoints(), p);
+
+      std::cout << "p(" << i << ") = " << p[0] << " " << p[1] << " " << p[2] << std::endl;
       clusterCenters->SetPoint(i, p);
       }
     }
+  else if(this->InitMethod == KMEANSPP) // http://en.wikipedia.org/wiki/K-means%2B%2B
+    {
+    // Assign one center at random
+    double p[3];
+    input->GetPoint(rand() % input->GetNumberOfPoints(), p);
+    clusterCenters->SetPoint(0, p);
+    // Assign the rest of the initial centers using a weighted probability of the distance to the nearest center
+    std::vector<double> weights(input->GetNumberOfPoints());
+    for(unsigned int cluster = 1; cluster < this->K; cluster++)
+      {
+      // Create weight vector
+      for(vtkIdType i = 0; i < input->GetNumberOfPoints(); i++)
+        {
+        double currentPoint[3];
+        input->GetPoint(i,currentPoint);
+        weights[i] = ClosestPointDistance(clusterCenters, currentPoint);
+        }
 
-
+      unsigned int selectedPoint = SelectWeightedIndex(weights);
+      input->GetPoint(selectedPoint, p);
+      clusterCenters->SetPoint(cluster, p);
+      }
+    }
+  else
+    {
+    std::cerr << "An invalid initialization method has been specified!" << std::endl;
+    exit(-1);
+    }
+  /*
+  std::cout << "Initial cluster centers: " << std::endl;
+  for(unsigned int i = 0; i < clusterCenters->GetNumberOfPoints(); i++)
+    {
+    double p[3];
+    clusterCenters->GetPoint(i, p);
+    std::cout << "Cluster center " << i << " : " << p[0] << " " << p[1] << " " << p[2] << std::endl;
+    }
+  */
   std::vector<unsigned int> oldLabels(input->GetNumberOfPoints(), 0); // initialize to all zeros
-  std::vector<unsigned int> labels(input->GetNumberOfPoints());
+  this->Labels.resize(input->GetNumberOfPoints());
 
+  int iter = 0;
   bool changed = true;
   do
     {
-    AssignLabels(input->GetPoints(), clusterCenters, labels);
+    AssignLabels(input->GetPoints(), clusterCenters);
 
-    EstimateClusterCenters(input->GetPoints(), clusterCenters, labels);
+    EstimateClusterCenters(input->GetPoints(), clusterCenters);
 
-    changed = CheckChanged(labels, oldLabels);
+    changed = CheckChanged(this->Labels, oldLabels);
 
     // Save the old labels
-    oldLabels = labels;
-
+    oldLabels = this->Labels;
+    iter++;
     }while(changed);
+    //}while(iter < 100);
+
+  std::cout << "KMeans finished in " << iter << " iterations." << std::endl;
 
   // Create the color map
   vtkSmartPointer<vtkLookupTable> colorLookupTable =
@@ -103,7 +137,7 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
   for(int i = 0; i < input->GetNumberOfPoints(); i++)
     {
     double dcolor[3];
-    colorLookupTable->GetColor(labels[i], dcolor);
+    colorLookupTable->GetColor(this->Labels[i], dcolor);
 
     unsigned char color[3];
     for(unsigned int j = 0; j < 3; j++)
@@ -123,15 +157,9 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
   outputColoredPoints->GetPointData()->SetScalars(colors);
 
   // Setup second output (cluster centers)
-
   vtkSmartPointer<vtkPolyData> clusterCentersPolyData =
     vtkSmartPointer<vtkPolyData>::New();
   clusterCentersPolyData->SetPoints(clusterCenters);
-
-  vtkSmartPointer<vtkSphereSource> sphereSource =
-    vtkSmartPointer<vtkSphereSource>::New();
-  sphereSource->SetRadius(0.1);
-  sphereSource->Update();
 
   vtkSmartPointer<vtkUnsignedCharArray> centerColors =
     vtkSmartPointer<vtkUnsignedCharArray>::New();
@@ -154,15 +182,92 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
 
   clusterCentersPolyData->GetPointData()->SetScalars(centerColors);
 
-  vtkSmartPointer<vtkGlyph3D> glyph3D =
-    vtkSmartPointer<vtkGlyph3D>::New();
-  glyph3D->SetSource(sphereSource->GetOutput());
-  glyph3D->SetInput(clusterCentersPolyData);
-  glyph3D->SetColorModeToColorByScalar();
-  glyph3D->ScalingOff();
-  glyph3D->Update();
+  outputClusterCenters->ShallowCopy(clusterCentersPolyData);
 
-  outputClusterCenters->ShallowCopy(glyph3D->GetOutput());
+  return 1;
+}
+
+std::vector<unsigned int> vtkKMeansClustering::GetIndicesWithLabel(unsigned int label)
+{
+  std::vector<unsigned int> pointsWithLabel;
+  for(unsigned int i = 0; i < this->Labels.size(); i++)
+    {
+    if(this->Labels[i] == label)
+      {
+      pointsWithLabel.push_back(i);
+      }
+    }
+
+  return pointsWithLabel;
+}
+
+void vtkKMeansClustering::GetPointsWithLabel(unsigned int label, vtkPoints* points)
+{
+  points->Reset();
+  points->Squeeze();
+
+  std::vector<unsigned int> indicesWithLabel = GetIndicesWithLabel(label);
+
+  for(unsigned int i = 0; i < indicesWithLabel.size(); i++)
+    {
+    double p[3];
+    this->Points->GetPoint(indicesWithLabel[i], p);
+    points->InsertNextPoint(p);
+    }
+}
+
+unsigned int vtkKMeansClustering::SelectWeightedIndex(std::vector<double> &inputWeights)
+{
+  // Ensure all weights are positive
+  for(unsigned int i = 0; i < inputWeights.size(); i++)
+    {
+    if(inputWeights[i] < 0)
+      {
+      std::cout << "inputWeights[" << i << "] is " << inputWeights[i] << " (must be positive!)" << std::endl;
+      exit(-1);
+      }
+    }
+
+  std::vector<double> weights = inputWeights;
+
+  // Normalize
+  double sum = std::accumulate(weights.begin(), weights.end(), 0);
+  std::cout << "sum: " << sum << std::endl;
+
+  for(unsigned int i = 0; i < weights.size(); i++)
+    {
+    weights[i] /= sum;
+    }
+
+  double randomValue = vtkMath::Random(0, 1);
+
+  double runningTotal = 0.0;
+  for(unsigned int i = 0; i < weights.size(); i++)
+    {
+    runningTotal += weights[i];
+    if(randomValue < runningTotal)
+      {
+      return i;
+      }
+    }
+
+  std::cerr << "vtkKMeansClustering::SelectWeightedIndex reached end, we should never get here" << std::endl;
+  std::cerr << "runningTotal: " << runningTotal << std::endl;
+  std::cerr << "randomValue: " << randomValue << std::endl;
+  exit(-1);
+  return 0;
+
+}
+
+void vtkKMeansClustering::GetRandomPointInBounds(vtkPoints* data, double p[3])
+{
+  double bounds[6];
+  data->GetBounds(bounds);
+  //std::cout << "Bounds: " << bounds[0] << " " << bounds[1] << " " << bounds[2] << " " << bounds[3] << " " << bounds[4] << " " << bounds[5] << std::endl;
+
+  p[0] = vtkMath::Random(bounds[0], bounds[1]);
+  p[1] = vtkMath::Random(bounds[2], bounds[3]);
+  p[2] = vtkMath::Random(bounds[4], bounds[5]);
 }
 
 bool vtkKMeansClustering::CheckChanged(std::vector<unsigned int> labels, std::vector<unsigned int> oldLabels)
@@ -179,20 +284,22 @@ bool vtkKMeansClustering::CheckChanged(std::vector<unsigned int> labels, std::ve
   return changed;
 }
 
-void vtkKMeansClustering::AssignLabels(vtkPoints* points, vtkPoints* clusterCenters, std::vector<unsigned int> &labels)
+void vtkKMeansClustering::AssignLabels(vtkPoints* points, vtkPoints* clusterCenters)
 {
   // Assign each point to the closest cluster
-
   for(unsigned int point = 0; point < points->GetNumberOfPoints(); point++)
     {
     unsigned int closestCluster = ClosestPointIndex(clusterCenters, points->GetPoint(point));
-    labels[point] = closestCluster;
+    this->Labels[point] = closestCluster;
     }
-
 }
 
-void vtkKMeansClustering::EstimateClusterCenters(vtkPoints* data, vtkPoints* clusterCenters, const std::vector<unsigned int> labels)
+void vtkKMeansClustering::EstimateClusterCenters(vtkPoints* data, vtkPoints* clusterCenters)
 {
+  vtkSmartPointer<vtkPoints> oldCenters =
+    vtkSmartPointer<vtkPoints>::New();
+  oldCenters->ShallowCopy(clusterCenters);
+
   clusterCenters->Reset();
   clusterCenters->Squeeze();
 
@@ -202,36 +309,24 @@ void vtkKMeansClustering::EstimateClusterCenters(vtkPoints* data, vtkPoints* clu
       vtkSmartPointer<vtkPoints>::New();
     for(unsigned int point = 0; point < data->GetNumberOfPoints(); point++)
       {
-      if(labels[point] == cluster)
+      if(this->Labels[point] == cluster)
         {
         classPoints->InsertNextPoint(data->GetPoint(point));
         }
       }
     double center[3];
-    CenterOfMass(classPoints, center);
+    if(classPoints->GetNumberOfPoints() == 0)
+      {
+      //GetRandomPoint(data, center);
+      oldCenters->GetPoint(cluster, center);
+      }
+    else
+      {
+      CenterOfMass(classPoints, center);
+      }
     clusterCenters->InsertNextPoint(center);
     }
 
-}
-
-std::vector<unsigned int> vtkKMeansClustering::UniqueRandomIndices(const unsigned int MAX, const unsigned int Number)
-{
-  // Generate Number unique random indices from 0 to MAX
-  vtkMath::RandomSeed(time(NULL));
-
-  std::set<unsigned int> S;
-  while(S.size() < Number)
-    {
-    S.insert(vtkMath::Random(0, MAX));
-    }
-
-  std::vector<unsigned int> indices;
-  for(std::set<unsigned int>::iterator iter = S.begin(); iter != S.end(); iter++)
-    {
-    indices.push_back(*iter);
-    }
-
-  return indices;
 }
 
 unsigned int vtkKMeansClustering::ClosestPointIndex(vtkPoints* points, double queryPoint[3])
@@ -240,6 +335,7 @@ unsigned int vtkKMeansClustering::ClosestPointIndex(vtkPoints* points, double qu
   double minDist = 100000;
   for(vtkIdType i = 0; i < points->GetNumberOfPoints(); i++)
     {
+    //double dist = sqrt(vtkMath::Distance2BetweenPoints(points->GetPoint(i), queryPoint));
     double dist = vtkMath::Distance2BetweenPoints(points->GetPoint(i), queryPoint);
     if(dist < minDist)
       {
@@ -251,8 +347,31 @@ unsigned int vtkKMeansClustering::ClosestPointIndex(vtkPoints* points, double qu
   return closestPoint;
 }
 
+double vtkKMeansClustering::ClosestPointDistance(vtkPoints* points, double queryPoint[3])
+{
+  unsigned int closestPoint = 0;
+  double minDist = std::numeric_limits<double>::infinity();
+  for(vtkIdType i = 0; i < points->GetNumberOfPoints(); i++)
+    {
+    double dist = sqrt(vtkMath::Distance2BetweenPoints(points->GetPoint(i), queryPoint));
+    //double dist = vtkMath::Distance2BetweenPoints(points->GetPoint(i), queryPoint);
+    if(dist < minDist)
+      {
+      minDist = dist;
+      closestPoint = i;
+      }
+    }
+
+  return minDist;
+}
+
 void vtkKMeansClustering::CenterOfMass(vtkPoints* points, double* center)
 {
+  if(points->GetNumberOfPoints() == 0)
+    {
+    std::cout << "Warning: tried to compute center of 0 points!" << std::endl;
+    return;
+    }
   center[0] = 0.0;
   center[1] = 0.0;
   center[2] = 0.0;
