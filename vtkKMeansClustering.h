@@ -24,6 +24,7 @@ an unorganized set of input points.
 #ifndef __vtkKMeansClustering_h
 #define __vtkKMeansClustering_h
 
+#include <vtkKdTreePointLocator.h>
 #include <vtkPolyDataAlgorithm.h>
 #include <vtkSmartPointer.h>
 
@@ -93,6 +94,9 @@ protected:
   // When RequestData is called, store the input points so that they don't have to be passed to each member function that needs it.
   vtkSmartPointer<vtkPoints> Points;
 
+  // Should use a KDTree to speed up
+  vtkSmartPointer<vtkKdTreePointLocator> KDTree;
+  
   // When RequestData is called, create a color lookup table so it doesn't have to be passed to each member function that needs it.
   vtkSmartPointer<vtkLookupTable> ColorLookupTable;
 

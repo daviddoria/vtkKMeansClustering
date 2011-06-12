@@ -45,6 +45,8 @@ vtkKMeansClustering::vtkKMeansClustering()
   this->ColorLookupTable = vtkSmartPointer<vtkLookupTable>::New();
     
   this->Random = true;
+
+  this->KDTree = vtkSmartPointer<vtkKdTreePointLocator>::New();
 }
 
 int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
@@ -67,6 +69,10 @@ int vtkKMeansClustering::RequestData(vtkInformation *vtkNotUsed(request),
 
   vtkPolyData *outputClusterCenters = vtkPolyData::SafeDownCast(
     outInfoClusterCenters->Get(vtkDataObject::DATA_OBJECT()));
+
+  // Create a KDTree of the points
+  this->KDTree->SetDataSet(input);
+  this->KDTree->BuildLocator();
 
   // Seed a random number generator
   if(this->Random)
@@ -294,6 +300,7 @@ void vtkKMeansClustering::EstimateClusterCenters(vtkPoints* data, vtkPoints* clu
 
 unsigned int vtkKMeansClustering::ClosestPointIndex(vtkPoints* points, double queryPoint[3])
 {
+  // Should use the KDTree here!
   unsigned int closestPoint = 0;
   double minDist = std::numeric_limits<double>::max();
   for(vtkIdType i = 0; i < points->GetNumberOfPoints(); i++)
