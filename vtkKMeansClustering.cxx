@@ -405,7 +405,7 @@ void vtkKMeansClustering::CreateOutputPointsPolyData(vtkPolyData* polyData)
   // Add a vertex to every point so the output is easily visualized
   vtkSmartPointer<vtkVertexGlyphFilter> vertexGlyphFilter =
     vtkSmartPointer<vtkVertexGlyphFilter>::New();
-  vertexGlyphFilter->SetInputConnection(tempPolyData->GetProducerPort());
+  vertexGlyphFilter->SetInputData(tempPolyData);
   vertexGlyphFilter->Update();
   polyData->ShallowCopy(vertexGlyphFilter->GetOutput());
 

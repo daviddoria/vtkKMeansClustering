@@ -6,11 +6,14 @@ ENABLE_TESTING()
 FIND_PACKAGE(VTK REQUIRED)
 INCLUDE(${VTK_USE_FILE})
 
-ADD_EXECUTABLE(KMeansClustering Example.cxx vtkKMeansClustering.cxx)
-TARGET_LINK_LIBRARIES(KMeansClustering ${VTK_LIBRARIES})
+add_library(libKMeansClustering vtkKMeansClustering.cxx)
+TARGET_LINK_LIBRARIES(libKMeansClustering ${VTK_LIBRARIES})
+
+ADD_EXECUTABLE(KMeansClustering Example.cxx)
+TARGET_LINK_LIBRARIES(KMeansClustering ${VTK_LIBRARIES} libKMeansClustering)
 
 ## test
-ADD_EXECUTABLE(Test Test.cxx vtkKMeansClustering.cxx )
-TARGET_LINK_LIBRARIES(Test ${VTK_LIBRARIES})
+ADD_EXECUTABLE(Test Test.cxx)
+TARGET_LINK_LIBRARIES(Test ${VTK_LIBRARIES} libKMeansClustering)
 
 ADD_TEST(Test ${CMAKE_CURRENT_BINARY_DIR}/Test)

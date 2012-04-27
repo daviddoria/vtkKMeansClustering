@@ -46,7 +46,7 @@ int main(int, char *[])
   vtkSmartPointer<vtkKMeansClustering> kmeans =
     vtkSmartPointer<vtkKMeansClustering>::New();
   kmeans->SetK(3);
-  kmeans->SetInputConnection(input->GetProducerPort());
+  kmeans->SetInputData(input);
   kmeans->SetRandom(false);
   kmeans->Update();
 

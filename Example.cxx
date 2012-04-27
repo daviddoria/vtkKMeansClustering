@@ -46,7 +46,7 @@ int main(int, char *[])
   vtkSmartPointer<vtkKMeansClustering> kmeans =
     vtkSmartPointer<vtkKMeansClustering>::New();
   kmeans->SetK(3);
-  kmeans->SetInputConnection(input->GetProducerPort());
+  kmeans->SetInputData(input);
   kmeans->SetInitMethod(vtkKMeansClustering::KMEANSPP);
   kmeans->SetRandom(false); // for repeatable results
   //kmeans->SetRandom(true); // for real, random results
@@ -93,8 +93,8 @@ int main(int, char *[])
   
   vtkSmartPointer<vtkGlyph3D> glyph3D =
     vtkSmartPointer<vtkGlyph3D>::New();
-  glyph3D->SetSource(sphereSource->GetOutput());
-  glyph3D->SetInput(kmeans->GetOutput(1));
+  glyph3D->SetSourceData(sphereSource->GetOutput());
+  glyph3D->SetInputData(kmeans->GetOutput(1));
   glyph3D->SetColorModeToColorByScalar();
   glyph3D->ScalingOff();
   glyph3D->Update();
