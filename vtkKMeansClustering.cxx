@@ -195,7 +195,7 @@ unsigned int vtkKMeansClustering::SelectWeightedIndex(std::vector<double> &input
   std::vector<double> weights = inputWeights;
 
   // Normalize
-  double sum = std::accumulate(weights.begin(), weights.end(), 0);
+  double sum = std::accumulate(weights.begin(), weights.end(), 0.0f);
   //std::cout << "sum: " << sum << std::endl;
   if(sum <= 0)
     {
